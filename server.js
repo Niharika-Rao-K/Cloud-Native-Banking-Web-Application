@@ -373,6 +373,9 @@ app.get('/transactions', (req, res) => {
 // ---------------------------
 // PROFILE PAGE (GET)
 // ---------------------------
+// ---------------------------
+// PROFILE PAGE (GET) - UPDATED
+// ---------------------------
 app.get('/profile', (req, res) => {
   if (!req.session.userId) return res.redirect('/');
 
@@ -380,104 +383,85 @@ app.get('/profile', (req, res) => {
     'SELECT email, full_name, phone, address, account_number FROM users WHERE id = ?',
     [req.session.userId],
     (err, user) => {
-      if (err || !user) {
-        console.error(err);
-        return res.status(500).send('Error loading profile');
+      if (err) {
+        console.error("Database error:", err);
+        return res.status(500).send('Database error loading profile');
       }
 
-      // Generate account number if not present
+      if (!user) {
+        console.error("User not found for id:", req.session.userId);
+        return res.status(404).send('User not found');
+      }
+
+      // Generate account number if missing
       if (!user.account_number) {
         const acct = 'ACCT' + Math.floor(100000 + Math.random() * 900000);
         db.run(
           'UPDATE users SET account_number = ? WHERE id = ?',
-          [acct, req.session.userId]
+          [acct, req.session.userId],
+          function (updateErr) {
+            if (updateErr) console.error("Error generating account number:", updateErr);
+          }
         );
         user.account_number = acct;
       }
 
-      res.send(`
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<title>Profile Settings</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-
-<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet"/>
-<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css" rel="stylesheet"/>
-
-<style>
-body {
-  background: linear-gradient(135deg, #b2f7ef, #eff7f6);
-  font-family: 'Poppins', sans-serif;
-  min-height: 100vh;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-}
-.profile-card {
-  background: #fff;
-  border-radius: 20px;
-  box-shadow: 0 10px 30px rgba(0,0,0,0.1);
-  padding: 35px;
-  width: 100%;
-  max-width: 550px;
-}
-</style>
-</head>
-
-<body>
-<div class="profile-card">
-<h3 class="text-center mb-3">
-<i class="fa-solid fa-user-gear"></i> Profile Settings
-</h3>
-
-<div class="alert alert-success">
-<strong>Account Number:</strong> ${user.account_number}
-</div>
-
-<form method="POST" action="/profile/update">
-  <div class="mb-3">
-    <label class="form-label">Full Name</label>
-    <input type="text" name="full_name" class="form-control" value="${user.full_name || ''}" required>
-  </div>
-
-  <div class="mb-3">
-    <label class="form-label">Phone</label>
-    <input type="text" name="phone" class="form-control" value="${user.phone || ''}">
-  </div>
-
-  <div class="mb-3">
-    <label class="form-label">Address</label>
-    <textarea name="address" class="form-control">${user.address || ''}</textarea>
-  </div>
-
-  <div class="mb-3">
-    <label class="form-label">Email</label>
-    <input type="email" name="email" class="form-control" value="${user.email}" required>
-  </div>
-
-  <div class="mb-3">
-    <label class="form-label">New Password (optional)</label>
-    <input type="password" name="password" class="form-control">
-  </div>
-
-  <button class="btn btn-primary w-100">Save Changes</button>
-</form>
-
-<a href="/account" class="btn btn-outline-secondary w-100 mt-3">
-Back to Dashboard
-</a>
-</div>
-</body>
-</html>
-`);
+      try {
+        res.send(`
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+            <meta charset="UTF-8">
+            <title>Profile Settings</title>
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet"/>
+            <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css" rel="stylesheet"/>
+          </head>
+          <body class="bg-light d-flex justify-content-center align-items-center" style="min-height:100vh;">
+            <div class="card p-4 shadow-lg" style="max-width:550px; width:100%;">
+              <h3 class="text-center mb-3"><i class="fa-solid fa-user-gear"></i> Profile Settings</h3>
+              <div class="alert alert-success"><strong>Account Number:</strong> ${user.account_number}</div>
+              <form method="POST" action="/profile/update">
+                <div class="mb-3">
+                  <label class="form-label">Full Name</label>
+                  <input type="text" name="full_name" class="form-control" value="${user.full_name || ''}" required>
+                </div>
+                <div class="mb-3">
+                  <label class="form-label">Phone</label>
+                  <input type="text" name="phone" class="form-control" value="${user.phone || ''}">
+                </div>
+                <div class="mb-3">
+                  <label class="form-label">Address</label>
+                  <textarea name="address" class="form-control">${user.address || ''}</textarea>
+                </div>
+                <div class="mb-3">
+                  <label class="form-label">Email</label>
+                  <input type="email" name="email" class="form-control" value="${user.email}" required>
+                </div>
+                <div class="mb-3">
+                  <label class="form-label">New Password (optional)</label>
+                  <input type="password" name="password" class="form-control">
+                </div>
+                <button class="btn btn-primary w-100">Save Changes</button>
+              </form>
+              <a href="/account" class="btn btn-outline-secondary w-100 mt-3">Back to Dashboard</a>
+            </div>
+          </body>
+          </html>
+        `);
+      } catch (renderErr) {
+        console.error("Error rendering profile page:", renderErr);
+        res.status(500).send('Error rendering profile page');
+      }
     }
   );
 });
 
 // ---------------------------
 // PROFILE UPDATE (POST)
+// ---------------------------
+// ---------------------------
+// PROFILE UPDATE (POST) - UPDATED
 // ---------------------------
 app.post('/profile/update', async (req, res) => {
   if (!req.session.userId) return res.redirect('/');
@@ -506,7 +490,7 @@ app.post('/profile/update', async (req, res) => {
 
     db.run(query, params, function (err) {
       if (err) {
-        console.error(err.message);
+        console.error("Profile update error:", err.message);
 
         if (err.message.includes('UNIQUE')) {
           return res.status(400).send('Email already exists');
@@ -515,18 +499,18 @@ app.post('/profile/update', async (req, res) => {
         return res.status(500).send('Error updating profile');
       }
 
+      // Update session email if changed
       req.session.email = email;
       res.redirect('/account');
     });
-
   } catch (error) {
-    console.error(error);
-    res.status(500).send('Password update failed');
+    console.error("Unexpected error:", error);
+    res.status(500).send('Error updating profile');
   }
 });
 
-
 // ---------------------------
 app.listen(PORT, () => console.log(`✅ Server running on http://localhost:${PORT}`));
+
 
 
