@@ -1,15 +1,27 @@
-# Node
+# Node dependencies
 node_modules/
+
+# Logs
 npm-debug.log*
+yarn-debug.log*
 yarn-error.log*
 
 # Environment variables
 .env
 
-# SQLite databases
+# SQLite database files
 *.sqlite
+*.sqlite3
 *.db
+
+# Session files (if any)
+sessions/
+
+# Coverage / cache
+coverage/
+.nyc_output/
 
 # OS files
 .DS_Store
 Thumbs.db
+
