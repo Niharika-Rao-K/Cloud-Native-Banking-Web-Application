@@ -39,11 +39,16 @@ app.use(
 // ---------------------------
 db.serialize(() => {
   db.run(`CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    email TEXT UNIQUE,
-    password TEXT,
-    balance REAL DEFAULT 0
-  )`);
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  email TEXT UNIQUE,
+  password TEXT,
+  balance REAL DEFAULT 0,
+  full_name TEXT,
+  phone TEXT,
+  address TEXT,
+  account_number TEXT
+)`);
+
 
   db.run(`CREATE TABLE IF NOT EXISTS transactions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -523,4 +528,5 @@ app.post('/profile/update', async (req, res) => {
 
 // ---------------------------
 app.listen(PORT, () => console.log(`✅ Server running on http://localhost:${PORT}`));
+
 
