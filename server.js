@@ -371,10 +371,7 @@ app.get('/transactions', (req, res) => {
 // PROFILE PAGE
 // ---------------------------
 // ---------------------------
-// PROFILE PAGE (GET)
-// ---------------------------
-// ---------------------------
-// PROFILE PAGE (GET) - UPDATED
+// PROFILE PAGE (GET) - SAFE VERSION
 // ---------------------------
 app.get('/profile', (req, res) => {
   if (!req.session.userId) return res.redirect('/');
@@ -406,62 +403,65 @@ app.get('/profile', (req, res) => {
         user.account_number = acct;
       }
 
-      try {
-        res.send(`
-          <!DOCTYPE html>
-          <html lang="en">
-          <head>
-            <meta charset="UTF-8">
-            <title>Profile Settings</title>
-            <meta name="viewport" content="width=device-width, initial-scale=1">
-            <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet"/>
-            <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css" rel="stylesheet"/>
-          </head>
-          <body class="bg-light d-flex justify-content-center align-items-center" style="min-height:100vh;">
-            <div class="card p-4 shadow-lg" style="max-width:550px; width:100%;">
-              <h3 class="text-center mb-3"><i class="fa-solid fa-user-gear"></i> Profile Settings</h3>
-              <div class="alert alert-success"><strong>Account Number:</strong> ${user.account_number}</div>
-              <form method="POST" action="/profile/update">
-                <div class="mb-3">
-                  <label class="form-label">Full Name</label>
-                  <input type="text" name="full_name" class="form-control" value="${user.full_name || ''}" required>
-                </div>
-                <div class="mb-3">
-                  <label class="form-label">Phone</label>
-                  <input type="text" name="phone" class="form-control" value="${user.phone || ''}">
-                </div>
-                <div class="mb-3">
-                  <label class="form-label">Address</label>
-                  <textarea name="address" class="form-control">${user.address || ''}</textarea>
-                </div>
-                <div class="mb-3">
-                  <label class="form-label">Email</label>
-                  <input type="email" name="email" class="form-control" value="${user.email}" required>
-                </div>
-                <div class="mb-3">
-                  <label class="form-label">New Password (optional)</label>
-                  <input type="password" name="password" class="form-control">
-                </div>
-                <button class="btn btn-primary w-100">Save Changes</button>
-              </form>
-              <a href="/account" class="btn btn-outline-secondary w-100 mt-3">Back to Dashboard</a>
-            </div>
-          </body>
-          </html>
-        `);
-      } catch (renderErr) {
-        console.error("Error rendering profile page:", renderErr);
-        res.status(500).send('Error rendering profile page');
-      }
+      // Ensure all fields have default values
+      const full_name = user.full_name || '';
+      const phone = user.phone || '';
+      const address = user.address || '';
+      const email = user.email || '';
+      const account_number = user.account_number;
+
+      res.send(`
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+          <meta charset="UTF-8">
+          <title>Profile Settings</title>
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet"/>
+          <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css" rel="stylesheet"/>
+        </head>
+        <body class="bg-light d-flex justify-content-center align-items-center" style="min-height:100vh;">
+          <div class="card p-4 shadow-lg" style="max-width:550px; width:100%;">
+            <h3 class="text-center mb-3"><i class="fa-solid fa-user-gear"></i> Profile Settings</h3>
+            <div class="alert alert-success"><strong>Account Number:</strong> ${account_number}</div>
+            <form method="POST" action="/profile/update">
+              <div class="mb-3">
+                <label class="form-label">Full Name</label>
+                <input type="text" name="full_name" class="form-control" value="${full_name}" required>
+              </div>
+              <div class="mb-3">
+                <label class="form-label">Phone</label>
+                <input type="text" name="phone" class="form-control" value="${phone}">
+              </div>
+              <div class="mb-3">
+                <label class="form-label">Address</label>
+                <textarea name="address" class="form-control">${address}</textarea>
+              </div>
+              <div class="mb-3">
+                <label class="form-label">Email</label>
+                <input type="email" name="email" class="form-control" value="${email}" required>
+              </div>
+              <div class="mb-3">
+                <label class="form-label">New Password (optional)</label>
+                <input type="password" name="password" class="form-control">
+              </div>
+              <button class="btn btn-primary w-100">Save Changes</button>
+            </form>
+            <a href="/account" class="btn btn-outline-secondary w-100 mt-3">Back to Dashboard</a>
+          </div>
+        </body>
+        </html>
+      `);
     }
   );
 });
+
 
 // ---------------------------
 // PROFILE UPDATE (POST)
 // ---------------------------
 // ---------------------------
-// PROFILE UPDATE (POST) - UPDATED
+// PROFILE UPDATE (POST) - SAFE VERSION
 // ---------------------------
 app.post('/profile/update', async (req, res) => {
   if (!req.session.userId) return res.redirect('/');
@@ -469,23 +469,30 @@ app.post('/profile/update', async (req, res) => {
   const { email, password, full_name, phone, address } = req.body;
 
   try {
+    // Validate required fields
+    if (!email || !full_name) {
+      return res.status(400).send('Email and Full Name are required');
+    }
+
     let query, params;
 
     if (password && password.trim() !== '') {
+      // If password provided, hash it
       const hash = await bcrypt.hash(password, 10);
       query = `
         UPDATE users
         SET email = ?, password = ?, full_name = ?, phone = ?, address = ?
         WHERE id = ?
       `;
-      params = [email, hash, full_name, phone, address, req.session.userId];
+      params = [email, hash, full_name, phone || '', address || '', req.session.userId];
     } else {
+      // Update without changing password
       query = `
         UPDATE users
         SET email = ?, full_name = ?, phone = ?, address = ?
         WHERE id = ?
       `;
-      params = [email, full_name, phone, address, req.session.userId];
+      params = [email, full_name, phone || '', address || '', req.session.userId];
     }
 
     db.run(query, params, function (err) {
@@ -511,6 +518,7 @@ app.post('/profile/update', async (req, res) => {
 
 // ---------------------------
 app.listen(PORT, () => console.log(`✅ Server running on http://localhost:${PORT}`));
+
 
 
 
