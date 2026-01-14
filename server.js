@@ -9,6 +9,10 @@ const bodyParser = require('body-parser');
 const app = express();
 const PORT = 3000;
 
+// ✅ REQUIRED to read form data
+app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
+
 // ---------------------------
 // DATABASE
 // ---------------------------
@@ -361,9 +365,9 @@ app.get('/transactions', (req, res) => {
 // ---------------------------
 // PROFILE PAGE
 // ---------------------------
-// ------------------------------------
-// BEAUTIFUL PROFILE PAGE
-// ------------------------------------
+// ---------------------------
+// PROFILE PAGE (GET)
+// ---------------------------
 app.get('/profile', (req, res) => {
   if (!req.session.userId) return res.redirect('/');
 
@@ -371,162 +375,152 @@ app.get('/profile', (req, res) => {
     'SELECT email, full_name, phone, address, account_number FROM users WHERE id = ?',
     [req.session.userId],
     (err, user) => {
-      if (err || !user) return res.status(500).send('Error loading profile');
+      if (err || !user) {
+        console.error(err);
+        return res.status(500).send('Error loading profile');
+      }
 
       // Generate account number if not present
       if (!user.account_number) {
-        const acct = 'ACCT' + String(Math.floor(100000 + Math.random() * 900000));
-        db.run('UPDATE users SET account_number = ? WHERE id = ?', [acct, req.session.userId]);
+        const acct = 'ACCT' + Math.floor(100000 + Math.random() * 900000);
+        db.run(
+          'UPDATE users SET account_number = ? WHERE id = ?',
+          [acct, req.session.userId]
+        );
         user.account_number = acct;
       }
 
       res.send(`
-        <!DOCTYPE html>
-        <html lang="en">
-        <head>
-          <meta charset="UTF-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>Profile Settings</title>
-          <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet"/>
-          <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css" rel="stylesheet"/>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Profile Settings</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
 
-          <style>
-            body {
-              background: linear-gradient(135deg, #b2f7ef, #eff7f6);
-              font-family: 'Poppins', sans-serif;
-              min-height: 100vh;
-              display: flex;
-              justify-content: center;
-              align-items: center;
-            }
-            .profile-card {
-              background: #fff;
-              border-radius: 20px;
-              box-shadow: 0 10px 30px rgba(0,0,0,0.1);
-              padding: 35px;
-              width: 100%;
-              max-width: 550px;
-            }
-            .profile-card h3 {
-              text-align: center;
-              font-weight: 700;
-              color: #004d40;
-            }
-            .divider {
-              height: 3px;
-              background: linear-gradient(90deg, #26a69a, #00796b);
-              margin: 10px auto 30px;
-              border-radius: 2px;
-              width: 80px;
-            }
-            .form-label i {
-              color: #00796b;
-              margin-right: 8px;
-            }
-            .form-control {
-              border-radius: 10px;
-              border: 1px solid #cfd8dc;
-              box-shadow: inset 0 1px 3px rgba(0,0,0,0.05);
-            }
-            .readonly-box {
-              background: #e0f2f1;
-              border-left: 5px solid #26a69a;
-              padding: 12px;
-              border-radius: 10px;
-              margin-bottom: 20px;
-            }
-            .readonly-box h6 {
-              margin: 0;
-              color: #004d40;
-              font-weight: 600;
-            }
-            .btn-primary {
-              background: linear-gradient(90deg, #26a69a, #00796b);
-              border: none;
-              border-radius: 12px;
-              font-weight: 600;
-              transition: 0.3s ease;
-            }
-            .btn-primary:hover {
-              transform: scale(1.05);
-              background: linear-gradient(90deg, #00796b, #004d40);
-            }
-            .btn-outline-secondary {
-              border-radius: 12px;
-              font-weight: 500;
-            }
-          </style>
-        </head>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet"/>
+<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css" rel="stylesheet"/>
 
-        <body>
-          <div class="profile-card">
-            <h3><i class="fa-solid fa-user-gear"></i> Profile Settings</h3>
-            <div class="divider"></div>
+<style>
+body {
+  background: linear-gradient(135deg, #b2f7ef, #eff7f6);
+  font-family: 'Poppins', sans-serif;
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+.profile-card {
+  background: #fff;
+  border-radius: 20px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+  padding: 35px;
+  width: 100%;
+  max-width: 550px;
+}
+</style>
+</head>
 
-            <div class="readonly-box">
-              <h6><i class="fa-solid fa-id-card"></i> Account Number: ${user.account_number}</h6>
-            </div>
+<body>
+<div class="profile-card">
+<h3 class="text-center mb-3">
+<i class="fa-solid fa-user-gear"></i> Profile Settings
+</h3>
 
-            <form method="POST" action="/profile/update">
-              <div class="mb-3">
-                <label class="form-label"><i class="fa-solid fa-user"></i> Full Name</label>
-                <input type="text" name="full_name" class="form-control" value="${user.full_name || ''}" placeholder="Enter your full name" required>
-              </div>
-              <div class="mb-3">
-                <label class="form-label"><i class="fa-solid fa-phone"></i> Phone</label>
-                <input type="text" name="phone" class="form-control" value="${user.phone || ''}" placeholder="Enter phone number">
-              </div>
-              <div class="mb-3">
-                <label class="form-label"><i class="fa-solid fa-house"></i> Address</label>
-                <textarea name="address" class="form-control" rows="2" placeholder="Enter your address">${user.address || ''}</textarea>
-              </div>
-              <div class="mb-3">
-                <label class="form-label"><i class="fa-solid fa-envelope"></i> Email</label>
-                <input type="email" name="email" class="form-control" value="${user.email}" required>
-              </div>
-              <div class="mb-3">
-                <label class="form-label"><i class="fa-solid fa-lock"></i> New Password (optional)</label>
-                <input type="password" name="password" class="form-control" placeholder="Enter new password">
-              </div>
-              <button class="btn btn-primary w-100 mt-3">
-                <i class="fa-solid fa-floppy-disk"></i> Save Changes
-              </button>
-            </form>
-            <a href="/account" class="btn btn-outline-secondary w-100 mt-3">
-              <i class="fa-solid fa-arrow-left"></i> Back to Dashboard
-            </a>
-          </div>
-        </body>
-        </html>
-      `);
+<div class="alert alert-success">
+<strong>Account Number:</strong> ${user.account_number}
+</div>
+
+<form method="POST" action="/profile/update">
+  <div class="mb-3">
+    <label class="form-label">Full Name</label>
+    <input type="text" name="full_name" class="form-control" value="${user.full_name || ''}" required>
+  </div>
+
+  <div class="mb-3">
+    <label class="form-label">Phone</label>
+    <input type="text" name="phone" class="form-control" value="${user.phone || ''}">
+  </div>
+
+  <div class="mb-3">
+    <label class="form-label">Address</label>
+    <textarea name="address" class="form-control">${user.address || ''}</textarea>
+  </div>
+
+  <div class="mb-3">
+    <label class="form-label">Email</label>
+    <input type="email" name="email" class="form-control" value="${user.email}" required>
+  </div>
+
+  <div class="mb-3">
+    <label class="form-label">New Password (optional)</label>
+    <input type="password" name="password" class="form-control">
+  </div>
+
+  <button class="btn btn-primary w-100">Save Changes</button>
+</form>
+
+<a href="/account" class="btn btn-outline-secondary w-100 mt-3">
+Back to Dashboard
+</a>
+</div>
+</body>
+</html>
+`);
     }
   );
 });
 
+// ---------------------------
+// PROFILE UPDATE (POST)
+// ---------------------------
 app.post('/profile/update', async (req, res) => {
   if (!req.session.userId) return res.redirect('/');
+
   const { email, password, full_name, phone, address } = req.body;
 
   try {
     let query, params;
+
     if (password && password.trim() !== '') {
       const hash = await bcrypt.hash(password, 10);
-      query = 'UPDATE users SET email=?, password=?, full_name=?, phone=?, address=? WHERE id=?';
+      query = `
+        UPDATE users
+        SET email = ?, password = ?, full_name = ?, phone = ?, address = ?
+        WHERE id = ?
+      `;
       params = [email, hash, full_name, phone, address, req.session.userId];
     } else {
-      query = 'UPDATE users SET email=?, full_name=?, phone=?, address=? WHERE id=?';
+      query = `
+        UPDATE users
+        SET email = ?, full_name = ?, phone = ?, address = ?
+        WHERE id = ?
+      `;
       params = [email, full_name, phone, address, req.session.userId];
     }
 
     db.run(query, params, function (err) {
-      if (err) return res.status(500).send('Error updating profile');
+      if (err) {
+        console.error(err.message);
+
+        if (err.message.includes('UNIQUE')) {
+          return res.status(400).send('Email already exists');
+        }
+
+        return res.status(500).send('Error updating profile');
+      }
+
       req.session.email = email;
       res.redirect('/account');
     });
-  } catch {
-    res.status(500).send('Error updating password');
+
+  } catch (error) {
+    console.error(error);
+    res.status(500).send('Password update failed');
   }
 });
 
+
 // ---------------------------
 app.listen(PORT, () => console.log(`✅ Server running on http://localhost:${PORT}`));
+
