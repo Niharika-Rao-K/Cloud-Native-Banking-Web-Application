@@ -1,0 +1,15 @@
+# Node
+node_modules/
+npm-debug.log*
+yarn-error.log*
+
+# Environment variables
+.env
+
+# SQLite databases
+*.sqlite
+*.db
+
+# OS files
+.DS_Store
+Thumbs.db
