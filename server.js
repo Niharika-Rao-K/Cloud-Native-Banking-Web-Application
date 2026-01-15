@@ -393,7 +393,54 @@ app.get('/profile', (req, res) => {
       pool.query('UPDATE users SET account_number = ? WHERE id = ?', [user.account_number, req.session.userId]);
     }
 
-    res.send(`...HTML FORM SAME AS BEFORE WITH VALUES FROM user...`);
+    res.send(`<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Profile Settings</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet"/>
+<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css" rel="stylesheet"/>
+<style>
+  body { background: #e0f7fa; font-family: 'Poppins', sans-serif; min-height:100vh; padding-top:40px; }
+  .card { border-radius: 20px; box-shadow: 0 8px 20px rgba(0,0,0,0.1); padding: 30px; max-width: 600px; margin:auto; background:#fff;}
+  .btn-custom { border-radius:12px; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h3 class="mb-4 text-center"><i class="fa-solid fa-user-gear"></i> Profile Settings</h3>
+  <form method="POST" action="/profile/update">
+    <div class="mb-3">
+      <label>Full Name</label>
+      <input type="text" name="full_name" class="form-control" value="${user.full_name || ''}" required/>
+    </div>
+    <div class="mb-3">
+      <label>Email</label>
+      <input type="email" name="email" class="form-control" value="${user.email}" required/>
+    </div>
+    <div class="mb-3">
+      <label>Password <small class="text-muted">(leave blank to keep current)</small></label>
+      <input type="password" name="password" class="form-control"/>
+    </div>
+    <div class="mb-3">
+      <label>Phone</label>
+      <input type="text" name="phone" class="form-control" value="${user.phone || ''}"/>
+    </div>
+    <div class="mb-3">
+      <label>Address</label>
+      <input type="text" name="address" class="form-control" value="${user.address || ''}"/>
+    </div>
+    <div class="mb-3">
+      <label>Account Number</label>
+      <input type="text" class="form-control" value="${user.account_number}" readonly/>
+    </div>
+    <button type="submit" class="btn btn-primary btn-custom w-100"><i class="fa-solid fa-floppy-disk"></i> Update Profile</button>
+  </form>
+  <a href="/account" class="btn btn-outline-secondary btn-custom w-100 mt-3"><i class="fa-solid fa-arrow-left"></i> Back to Dashboard</a>
+</div>
+</body>
+</html>`);
   });
 });
 
@@ -432,3 +479,4 @@ app.post('/profile/update', async (req, res) => {
 app.listen(PORT, () => console.log(`✅ Server running on http://localhost:${PORT}`));
 
 // minor update
+
