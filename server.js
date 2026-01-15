@@ -4,7 +4,7 @@ const session = require('express-session');
 const bcrypt = require('bcrypt');
 const mysql = require('mysql2');
 const path = require('path');
-
+require('dotenv').config(); 
 const app = express();
 const PORT = 3000;
 
@@ -15,8 +15,6 @@ app.use(express.json());
 // ---------------------------
 // DATABASE CONNECTION (AWS RDS MySQL)
 // ---------------------------
-require('dotenv').config(); // Load .env
-const mysql = require('mysql2');
 const pool = mysql.createPool({
   host: process.env.DB_HOST || 'banking-db.c6lmm0ime0ay.us-east-1.rds.amazonaws.com', // e.g., banking-db.xxxxx.us-east-1.rds.amazonaws.com
   user: process.env.DB_USER || 'admin',
@@ -479,4 +477,5 @@ app.post('/profile/update', async (req, res) => {
 app.listen(PORT, () => console.log(`✅ Server running on http://localhost:${PORT}`));
 
 // minor update
+
 
