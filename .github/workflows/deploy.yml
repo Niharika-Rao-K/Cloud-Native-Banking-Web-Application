@@ -1,0 +1,30 @@
+name: Deploy to EC2
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up SSH
+        uses: webfactory/ssh-agent@v0.5.4
+        with:
+          ssh-private-key: ${{ secrets.EC2_SSH_KEY }}
+
+      - name: Deploy to EC2
+        run: |
+          ssh -o StrictHostKeyChecking=no ubuntu@3.80.126.85 "
+            cd ~/Cloud-Native-Banking-Web-Application;
+            git pull origin main;
+            docker build -t banking-app .;
+            docker stop banking-app || true;
+            docker rm banking-app || true;
+            docker run -d -p 3000:3000 banking-app
+          "
