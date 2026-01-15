@@ -7,6 +7,9 @@ const path = require('path');
 require('dotenv').config(); 
 const app = express();
 const PORT = 3000;
+const fetch = (...args) =>
+  import('node-fetch').then(({ default: fetch }) => fetch(...args));
+
 
 // ✅ REQUIRED to read form data
 app.use(express.urlencoded({ extended: true }));
@@ -284,10 +287,26 @@ app.post('/transfer', (req, res) => {
               (err) => {
                 if (err) return conn.rollback(() => conn.release() && res.send('Error logging transaction'));
                 conn.commit((err) => {
-                  if (err) return conn.rollback(() => conn.release() && res.send('Transaction commit error'));
-                  conn.release();
-                  res.redirect('/account');
-                });
+  if (err) return conn.rollback(() => conn.release() && res.send('Transaction commit error'));
+
+  // 🔹 SERVERLESS AUDIT LOG (NON-BLOCKING)
+  fetch("https://ouuoixhdzj.execute-api.us-east-1.amazonaws.com/audit", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      user: req.session.email,
+      amount: amt,
+      type: "transfer",
+      timestamp: new Date().toISOString()
+    })
+  }).catch(err => {
+    console.error("Audit logging failed:", err.message);
+  });
+
+  conn.release();
+  res.redirect('/account');
+});
+
               }
             );
           });
@@ -477,5 +496,6 @@ app.post('/profile/update', async (req, res) => {
 app.listen(PORT, () => console.log(`✅ Server running on http://localhost:${PORT}`));
 
 // minor update
+
 
 
