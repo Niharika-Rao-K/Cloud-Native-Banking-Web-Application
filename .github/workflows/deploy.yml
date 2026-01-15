@@ -26,5 +26,5 @@ jobs:
             docker build -t banking-app .;
             docker stop banking-app || true;
             docker rm banking-app || true;
-            docker run -d -p 3000:3000 banking-app
+            docker run -d --name banking-app -p 3000:3000 banking-app
           "
