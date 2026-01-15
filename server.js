@@ -428,3 +428,4 @@ app.post('/profile/update', async (req, res) => {
 
 // ---------------------------
 app.listen(PORT, () => console.log(`✅ Server running on http://localhost:${PORT}`));
+// minor update
