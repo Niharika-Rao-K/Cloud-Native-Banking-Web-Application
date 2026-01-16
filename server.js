@@ -31,6 +31,10 @@ app.use(
 // ---------------------------
 // DATABASE
 // ---------------------------
+if (!process.env.DB_HOST) {
+  console.error("❌ DB_HOST is not set. Check .env file.");
+  process.exit(1);
+}
 const pool = mysql.createPool({
   host: process.env.DB_HOST,
   user: process.env.DB_USER,
@@ -249,4 +253,5 @@ app.post('/transfer', (req, res) => {
 app.listen(PORT, () =>
   console.log(`✅ Server running on http://<elastic_ip>:${PORT}`)
 );
+
 
