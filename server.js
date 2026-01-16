@@ -4,43 +4,22 @@ const session = require('express-session');
 const bcrypt = require('bcrypt');
 const mysql = require('mysql2');
 const path = require('path');
-require('dotenv').config(); 
+require('dotenv').config();
+
 const app = express();
 const PORT = 3000;
+
+// node-fetch (for serverless audit)
 const fetch = (...args) =>
   import('node-fetch').then(({ default: fetch }) => fetch(...args));
 
-
-// ✅ REQUIRED to read form data
+// ---------------------------
+// MIDDLEWARE
+// ---------------------------
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
-
-// ---------------------------
-// DATABASE CONNECTION (AWS RDS MySQL)
-// ---------------------------
-const pool = mysql.createPool({
-  host: process.env.DB_HOST || 'banking-db.c6lmm0ime0ay.us-east-1.rds.amazonaws.com', // e.g., banking-db.xxxxx.us-east-1.rds.amazonaws.com
-  user: process.env.DB_USER || 'admin',
-  password: process.env.DB_PASS || 'bank-cloud9',
-  database: process.env.DB_NAME || 'banking',
-  waitForConnections: true,
-  connectionLimit: 10,
-  queueLimit: 0
-});
-
-// Test connection
-pool.getConnection((err, connection) => {
-  if (err) console.error('DB connection failed:', err);
-  else {
-    console.log('✅ Connected to MySQL RDS!');
-    connection.release();
-  }
-});
-
-// ---------------------------
-// MIDDLEWARES
-// ---------------------------
 app.use(express.static(path.join(__dirname, 'public')));
+
 app.use(
   session({
     secret: 'secret-key',
@@ -50,10 +29,30 @@ app.use(
 );
 
 // ---------------------------
-// CREATE TABLES IF NOT EXISTS
+// DATABASE (AWS RDS MySQL)
 // ---------------------------
-const createTables = async () => {
-  const createUsers = `
+const pool = mysql.createPool({
+  host: process.env.DB_HOST || 'banking-db.c6lmm0ime0ay.us-east-1.rds.amazonaws.com',
+  user: process.env.DB_USER || 'admin',
+  password: process.env.DB_PASS || 'bank-cloud9',
+  database: process.env.DB_NAME || 'banking',
+  waitForConnections: true,
+  connectionLimit: 10
+});
+
+pool.getConnection((err, conn) => {
+  if (err) console.error('❌ DB connection failed:', err);
+  else {
+    console.log('✅ Connected to MySQL RDS');
+    conn.release();
+  }
+});
+
+// ---------------------------
+// CREATE TABLES
+// ---------------------------
+const createTables = () => {
+  pool.query(`
     CREATE TABLE IF NOT EXISTS users (
       id INT AUTO_INCREMENT PRIMARY KEY,
       email VARCHAR(255) UNIQUE,
@@ -63,75 +62,56 @@ const createTables = async () => {
       phone VARCHAR(50),
       address VARCHAR(255),
       account_number VARCHAR(20)
-    );
-  `;
-  const createTransactions = `
+    )
+  `);
+
+  pool.query(`
     CREATE TABLE IF NOT EXISTS transactions (
       id INT AUTO_INCREMENT PRIMARY KEY,
       sender_id INT,
       receiver_id INT,
       type VARCHAR(50),
       amount DECIMAL(10,2),
-      date DATETIME,
-      FOREIGN KEY (sender_id) REFERENCES users(id),
-      FOREIGN KEY (receiver_id) REFERENCES users(id)
-    );
-  `;
-  pool.query(createUsers, (err) => {
-    if (err) console.error('Error creating users table:', err);
-  });
-  pool.query(createTransactions, (err) => {
-    if (err) console.error('Error creating transactions table:', err);
-  });
+      date DATETIME
+    )
+  `);
 };
 createTables();
 
 // ---------------------------
 // ROUTES
 // ---------------------------
+app.get('/', (_, res) => res.sendFile(path.join(__dirname, 'views/login.html')));
+app.get('/signup', (_, res) => res.sendFile(path.join(__dirname, 'views/signup.html')));
 
-// Root → Login Page
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'views', 'login.html'));
-});
-
-// Signup Page
-app.get('/signup', (req, res) => {
-  res.sendFile(path.join(__dirname, 'views', 'signup.html'));
-});
-
-// Handle Signup
+// ---------------------------
+// AUTH
+// ---------------------------
 app.post('/signup', async (req, res) => {
-  const { email, password } = req.body;
-  const hash = await bcrypt.hash(password, 10);
-
-  const sql = 'INSERT INTO users (email, password, balance) VALUES (?, ?, 0)';
-  pool.query(sql, [email, hash], (err) => {
-    if (err) {
-      console.error('Signup error:', err);
-      return res.send('Error creating account. Try another email.');
-    }
-    res.redirect('/');
-  });
+  const hash = await bcrypt.hash(req.body.password, 10);
+  pool.query(
+    'INSERT INTO users (email, password) VALUES (?, ?)',
+    [req.body.email, hash],
+    err => err ? res.send('Signup error') : res.redirect('/')
+  );
 });
 
-// Handle Login
 app.post('/login', (req, res) => {
-  const { email, password } = req.body;
-  pool.query('SELECT * FROM users WHERE email = ?', [email], async (err, results) => {
-    const user = results[0];
-    if (err || !user) return res.send('Invalid email or password');
+  pool.query(
+    'SELECT * FROM users WHERE email=?',
+    [req.body.email],
+    async (err, r) => {
+      if (err || !r[0]) return res.send('Invalid login');
+      const ok = await bcrypt.compare(req.body.password, r[0].password);
+      if (!ok) return res.send('Invalid login');
 
-    const match = await bcrypt.compare(password, user.password);
-    if (!match) return res.send('Invalid email or password');
-
-    req.session.userId = user.id;
-    req.session.email = user.email;
-    res.redirect('/account');
-  });
+      req.session.userId = r[0].id;
+      req.session.email = r[0].email;
+      res.redirect('/account');
+    }
+  );
 });
 
-// Logout
 app.get('/logout', (req, res) => {
   req.session.destroy(() => res.redirect('/'));
 });
@@ -142,360 +122,110 @@ app.get('/logout', (req, res) => {
 app.get('/account', (req, res) => {
   if (!req.session.userId) return res.redirect('/');
 
-  pool.query('SELECT email, balance FROM users WHERE id = ?', [req.session.userId], (err, results) => {
-    if (err || !results[0]) return res.status(500).send('Error loading account');
-    const user = results[0];
+  pool.query(
+    'SELECT email, balance FROM users WHERE id=?',
+    [req.session.userId],
+    (err, r) => {
+      if (err) return res.send('Error');
 
-    res.send(`
-      <!doctype html>
-      <html lang="en">
-      <head>
-        <meta charset="utf-8"/>
-        <meta name="viewport" content="width=device-width, initial-scale=1"/>
-        <title>SmartBank Dashboard</title>
-        <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet"/>
-        <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css" rel="stylesheet"/>
-        <style>
-          body { background: linear-gradient(to right, #e0f7fa, #b2ebf2); min-height: 100vh; font-family: 'Poppins', sans-serif; }
-          .dashboard-card { border-radius: 20px; overflow: hidden; box-shadow: 0 8px 20px rgba(0,0,0,0.15); background: #fff; }
-          .balance-box { background: linear-gradient(90deg, #26a69a, #00796b); color: #fff; padding: 25px; border-radius: 15px; text-align: center; font-size: 2rem; font-weight: 600; margin-bottom: 30px; }
-          .section-box { border-radius: 15px; padding: 20px; margin-bottom: 25px; }
-          .section-box h5 { display: flex; align-items: center; gap: 10px; font-weight: 600; }
-          .section-box i { font-size: 1.6rem; color: #00796b; }
-          .btn-custom { border-radius: 12px; transition: all 0.2s ease-in-out; }
-          .btn-custom:hover { transform: scale(1.05); }
-        </style>
-      </head>
-      <body>
-        <div class="container py-5">
-          <div class="dashboard-card p-5 mx-auto" style="max-width: 600px;">
-            <div class="d-flex justify-content-between align-items-center mb-4">
-              <h3><i class="fa-solid fa-building-columns text-primary"></i> SmartBank</h3>
-              <form method="GET" action="/logout">
-                <button class="btn btn-outline-danger btn-sm">
-                  <i class="fa-solid fa-right-from-bracket"></i> Logout
-                </button>
-              </form>
-            </div>
-            <h5 class="text-muted mb-3"><i class="fa-solid fa-user"></i> Welcome, ${user.email}</h5>
-            <div class="balance-box shadow-sm mb-4">
-              <i class="fa-solid fa-wallet"></i> $${parseFloat(user.balance).toFixed(2)}
-            </div>
-            <div class="section-box" style="background:#acdbf2;">
-              <h5><i class="fa-solid fa-money-bill-wave"></i> Add Money</h5>
-              <form method="POST" action="/add-money" class="mt-3">
-                <div class="input-group">
-                  <input name="amount" type="number" step="0.01" class="form-control" placeholder="Enter amount" required />
-                  <button class="btn btn-success btn-custom" type="submit" style="background-color:#75c78b; border-color:#75c78b;">
-                    <i class="fa-solid fa-circle-plus"></i> Add
-                  </button>
-                </div>
-              </form>
-            </div>
-            <div class="section-box" style="background:#d9f5ba;">
-              <h5><i class="fa-solid fa-paper-plane"></i> Transfer Money</h5>
-              <form method="POST" action="/transfer" class="mt-3">
-                <input name="receiver" type="email" class="form-control mb-2" placeholder="Recipient Email" required />
-                <div class="input-group">
-                  <input name="amount" type="number" step="0.01" class="form-control" placeholder="Amount" required />
-                  <button class="btn btn-primary btn-custom" type="submit" style="background-color:#99c9f0; border-color:#99c9f0;">
-                    <i class="fa-solid fa-money-bill-transfer"></i> Send
-                  </button>
-                </div>
-              </form>
-            </div>
-            <div class="d-grid gap-2 mt-4">
-              <a href="/transactions" class="btn btn-outline-info btn-custom">
-                <i class="fa-solid fa-list"></i> View Transactions
-              </a>
-              <a href="/profile" class="btn btn-outline-warning btn-custom">
-                <i class="fa-solid fa-user-gear"></i> Profile Settings
-              </a>
-            </div>
-          </div>
-        </div>
-      </body>
-      </html>
-    `);
-  });
+      res.send(`
+        <h2>Welcome ${r[0].email}</h2>
+        <h3>Balance: $${r[0].balance}</h3>
+
+        <form method="POST" action="/transfer">
+          <input name="receiver" placeholder="Receiver Email" required />
+          <input name="amount" type="number" step="0.01" required />
+          <button>Transfer</button>
+        </form>
+
+        <a href="/logout">Logout</a>
+      `);
+    }
+  );
 });
 
 // ---------------------------
-// ADD MONEY
-// ---------------------------
-app.post('/add-money', (req, res) => {
-  if (!req.session.userId) return res.redirect('/');
-  const amount = parseFloat(req.body.amount);
-
-  pool.getConnection((err, conn) => {
-    if (err) return res.send('Database connection error');
-    conn.beginTransaction((err) => {
-      if (err) return res.send('Transaction error');
-
-      conn.query(
-        'UPDATE users SET balance = balance + ? WHERE id = ?',
-        [amount, req.session.userId],
-        (err) => {
-          if (err) return conn.rollback(() => res.send('Error depositing money'));
-
-          conn.query(
-            'INSERT INTO transactions (sender_id, receiver_id, type, amount, date) VALUES (?, ?, "deposit", ?, NOW())',
-            [req.session.userId, req.session.userId, amount],
-            (err) => {
-              if (err) return conn.rollback(() => res.send('Error logging transaction'));
-              conn.commit((err) => {
-                if (err) return conn.rollback(() => res.send('Transaction commit error'));
-                conn.release();
-                res.redirect('/account');
-              });
-            }
-          );
-        }
-      );
-    });
-  });
-});
-
-// ---------------------------
-// TRANSFER MONEY
+// TRANSFER MONEY (🔥 MAIN FIX HERE)
 // ---------------------------
 app.post('/transfer', (req, res) => {
   if (!req.session.userId) return res.redirect('/');
-  const { receiver, amount } = req.body;
-  const amt = parseFloat(amount);
+
+  const receiver = req.body.receiver;
+  const amt = parseFloat(req.body.amount);
+
+  if (!receiver || isNaN(amt) || amt <= 0) {
+    return res.send('Invalid transfer data');
+  }
 
   pool.getConnection((err, conn) => {
-    if (err) return res.send('Database connection error');
+    if (err) return res.send('DB error');
 
-    conn.query('SELECT * FROM users WHERE email = ?', [receiver], (err, results) => {
-      const user = results[0];
-      if (err || !user) return conn.release() && res.send('Receiver not found');
-      if (receiver === req.session.email) return conn.release() && res.send('Cannot transfer to yourself');
+    conn.query(
+      'SELECT * FROM users WHERE id=?',
+      [req.session.userId],
+      (err, senderRows) => {
+        const sender = senderRows[0];
+        if (sender.balance < amt) {
+          conn.release();
+          return res.send('Insufficient balance');
+        }
 
-      conn.beginTransaction((err) => {
-        if (err) return conn.release() && res.send('Transaction error');
+        conn.query(
+          'SELECT * FROM users WHERE email=?',
+          [receiver],
+          (err, recvRows) => {
+            if (err || !recvRows[0]) {
+              conn.release();
+              return res.send('Receiver not found');
+            }
 
-        conn.query('UPDATE users SET balance = balance - ? WHERE id = ?', [amt, req.session.userId], (err) => {
-          if (err) return conn.rollback(() => conn.release() && res.send('Error updating sender'));
+            const receiverUser = recvRows[0];
 
-          conn.query('UPDATE users SET balance = balance + ? WHERE id = ?', [amt, user.id], (err) => {
-            if (err) return conn.rollback(() => conn.release() && res.send('Error updating receiver'));
+            conn.beginTransaction(() => {
+              conn.query(
+                'UPDATE users SET balance = balance - ? WHERE id=?',
+                [amt, sender.id]
+              );
 
-            conn.query(
-              'INSERT INTO transactions (sender_id, receiver_id, type, amount, date) VALUES (?, ?, "transfer", ?, NOW())',
-              [req.session.userId, user.id, amt],
-              (err) => {
-                if (err) return conn.rollback(() => conn.release() && res.send('Error logging transaction'));
-                conn.commit((err) => {
-  if (err) return conn.rollback(() => conn.release() && res.send('Transaction commit error'));
+              conn.query(
+                'UPDATE users SET balance = balance + ? WHERE id=?',
+                [amt, receiverUser.id]
+              );
 
-  // 🔹 SERVERLESS AUDIT LOG (NON-BLOCKING)
-  fetch("https://ouuoixhdzj.execute-api.us-east-1.amazonaws.com/audit", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      user: req.session.email,
-      amount: amt,
-      type: "transfer",
-      timestamp: new Date().toISOString()
-    })
-  }).catch(err => {
-    console.error("Audit logging failed:", err.message);
-  });
+              conn.query(
+                'INSERT INTO transactions (sender_id, receiver_id, type, amount, date) VALUES (?, ?, "transfer", ?, NOW())',
+                [sender.id, receiverUser.id, amt],
+                () => {
+                  conn.commit(() => {
+                    conn.release();
 
-  conn.release();
-  res.redirect('/account');
-});
+                    // 🔥 SERVERLESS AUDIT (CloudWatch)
+                    fetch("https://ouuoixhdzj.execute-api.us-east-1.amazonaws.com/audit", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        user: req.session.email,
+                        amount: amt,
+                        type: "transfer",
+                        timestamp: new Date().toISOString()
+                      })
+                    }).catch(err =>
+                      console.error("Audit failed:", err.message)
+                    );
 
-              }
-            );
-          });
-        });
-      });
-    });
-  });
-});
-
-// ---------------------------
-// TRANSACTIONS PAGE
-// ---------------------------
-// (Same logic as before, just replace SQLite queries with MySQL)
-app.get('/transactions', (req, res) => {
-  if (!req.session.userId) return res.redirect('/');
-
-  const sql = `
-    SELECT t.*, u1.email AS sender_email, u2.email AS receiver_email
-    FROM transactions t
-    LEFT JOIN users u1 ON t.sender_id = u1.id
-    LEFT JOIN users u2 ON t.receiver_id = u2.id
-    WHERE t.sender_id = ? OR t.receiver_id = ?
-    ORDER BY t.date DESC
-  `;
-
-  pool.query(sql, [req.session.userId, req.session.userId], (err, rows) => {
-    if (err) return res.status(500).send('Error fetching transactions');
-
-    const html = rows
-      .map((t) => {
-        const isOutgoing = t.sender_email === req.session.email;
-        const badgeClass = t.type === 'deposit' ? 'success' : isOutgoing ? 'danger' : 'primary';
-        const sign = t.type === 'deposit' ? '+' : isOutgoing ? '-' : '+';
-        const desc = t.type === 'deposit' ? 'Added funds' : isOutgoing ? `Sent to ${t.receiver_email}` : `Received from ${t.sender_email}`;
-
-        return `
-          <div class="card shadow-sm mb-3 border-${badgeClass}">
-            <div class="card-body d-flex justify-content-between align-items-center">
-              <div>
-                <h6 class="text-${badgeClass} mb-1">
-                  <i class="fa-solid ${t.type === 'deposit' ? 'fa-circle-plus' : isOutgoing ? 'fa-paper-plane' : 'fa-inbox'}"></i> ${t.type.toUpperCase()}
-                </h6>
-                <small class="text-muted">${desc}</small>
-              </div>
-              <div class="text-end">
-                <h5 class="${badgeClass === 'danger' ? 'text-danger' : 'text-success'}">
-                  ${sign}$${parseFloat(t.amount).toFixed(2)}
-                </h5>
-                <small class="text-muted">${new Date(t.date).toLocaleString()}</small>
-              </div>
-            </div>
-          </div>
-        `;
-      })
-      .join('');
-
-    res.send(`
-      <html>
-      <head>
-        <title>Transactions</title>
-        <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet"/>
-        <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css" rel="stylesheet"/>
-      </head>
-      <body class="bg-light">
-        <div class="container py-5">
-          <div class="card p-4 shadow-lg" style="max-width:700px;margin:auto;">
-            <h3 class="mb-3 text-center"><i class="fa-solid fa-list"></i> Transaction History</h3>
-            <input type="text" id="search" class="form-control mb-3" placeholder="Search transactions...">
-            <div id="transactions">${html || '<p class="text-center text-muted">No transactions yet.</p>'}</div>
-            <a href="/account" class="btn btn-outline-secondary w-100 mt-3">
-              <i class="fa-solid fa-arrow-left"></i> Back
-            </a>
-          </div>
-        </div>
-        <script>
-          const search = document.getElementById('search');
-          search.addEventListener('input', () => {
-            const val = search.value.toLowerCase();
-            document.querySelectorAll('#transactions .card').forEach(card => {
-              card.style.display = card.innerText.toLowerCase().includes(val) ? '' : 'none';
+                    res.redirect('/account');
+                  });
+                }
+              );
             });
-          });
-        </script>
-      </body>
-      </html>
-    `);
-  });
-});
-
-// ---------------------------
-// PROFILE PAGE AND UPDATE
-// (Keep same logic, just MySQL queries instead of SQLite)
-app.get('/profile', (req, res) => {
-  if (!req.session.userId) return res.redirect('/');
-  pool.query('SELECT * FROM users WHERE id = ?', [req.session.userId], (err, results) => {
-    const user = results[0];
-    if (err || !user) return res.status(500).send('Database error loading profile');
-
-    if (!user.account_number) {
-      user.account_number = 'ACCT' + Math.floor(100000 + Math.random() * 900000);
-      pool.query('UPDATE users SET account_number = ? WHERE id = ?', [user.account_number, req.session.userId]);
-    }
-
-    res.send(`<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Profile Settings</title>
-<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet"/>
-<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css" rel="stylesheet"/>
-<style>
-  body { background: #e0f7fa; font-family: 'Poppins', sans-serif; min-height:100vh; padding-top:40px; }
-  .card { border-radius: 20px; box-shadow: 0 8px 20px rgba(0,0,0,0.1); padding: 30px; max-width: 600px; margin:auto; background:#fff;}
-  .btn-custom { border-radius:12px; }
-</style>
-</head>
-<body>
-<div class="card">
-  <h3 class="mb-4 text-center"><i class="fa-solid fa-user-gear"></i> Profile Settings</h3>
-  <form method="POST" action="/profile/update">
-    <div class="mb-3">
-      <label>Full Name</label>
-      <input type="text" name="full_name" class="form-control" value="${user.full_name || ''}" required/>
-    </div>
-    <div class="mb-3">
-      <label>Email</label>
-      <input type="email" name="email" class="form-control" value="${user.email}" required/>
-    </div>
-    <div class="mb-3">
-      <label>Password <small class="text-muted">(leave blank to keep current)</small></label>
-      <input type="password" name="password" class="form-control"/>
-    </div>
-    <div class="mb-3">
-      <label>Phone</label>
-      <input type="text" name="phone" class="form-control" value="${user.phone || ''}"/>
-    </div>
-    <div class="mb-3">
-      <label>Address</label>
-      <input type="text" name="address" class="form-control" value="${user.address || ''}"/>
-    </div>
-    <div class="mb-3">
-      <label>Account Number</label>
-      <input type="text" class="form-control" value="${user.account_number}" readonly/>
-    </div>
-    <button type="submit" class="btn btn-primary btn-custom w-100"><i class="fa-solid fa-floppy-disk"></i> Update Profile</button>
-  </form>
-  <a href="/account" class="btn btn-outline-secondary btn-custom w-100 mt-3"><i class="fa-solid fa-arrow-left"></i> Back to Dashboard</a>
-</div>
-</body>
-</html>`);
-  });
-});
-
-app.post('/profile/update', async (req, res) => {
-  if (!req.session.userId) return res.redirect('/');
-  const { email, password, full_name, phone, address } = req.body;
-
-  try {
-    if (!email || !full_name) return res.status(400).send('Email and Full Name required');
-    let query, params;
-
-    if (password && password.trim() !== '') {
-      const hash = await bcrypt.hash(password, 10);
-      query = 'UPDATE users SET email=?, password=?, full_name=?, phone=?, address=? WHERE id=?';
-      params = [email, hash, full_name, phone || '', address || '', req.session.userId];
-    } else {
-      query = 'UPDATE users SET email=?, full_name=?, phone=?, address=? WHERE id=?';
-      params = [email, full_name, phone || '', address || '', req.session.userId];
-    }
-
-    pool.query(query, params, (err) => {
-      if (err) {
-        if (err.code === 'ER_DUP_ENTRY') return res.status(400).send('Email already exists');
-        return res.status(500).send('Error updating profile');
+          }
+        );
       }
-      req.session.email = email;
-      res.redirect('/account');
-    });
-  } catch (error) {
-    console.error(error);
-    res.status(500).send('Error updating profile');
-  }
+    );
+  });
 });
 
 // ---------------------------
-app.listen(PORT, () => console.log(`✅ Server running on http://localhost:${PORT}`));
-
-// minor update
-
-
-
+app.listen(PORT, () =>
+  console.log(`✅ Server running at http://<elastic_ip>:${PORT}`)
+);
