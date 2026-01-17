@@ -57,6 +57,16 @@ const pool = mysql.createPool({
 })();
 
 // ---------------------------
+// TEMPORARY TEST ROUTE (bypass session)
+// ---------------------------
+app.post('/test', (req, res) => {
+  console.log('🚀 /test route hit');
+  console.log('Body:', req.body);
+  res.send('ok');
+});
+
+
+// ---------------------------
 // ROUTES
 // ---------------------------
 app.get('/', (_, res) =>
@@ -218,4 +228,5 @@ app.post('/transfer', async (req, res) => {
 app.listen(PORT, () =>
   console.log(`✅ Server running on http://<elastic_ip>:${PORT}`)
 );
+
 
