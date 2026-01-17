@@ -2,14 +2,14 @@
 const express = require('express');
 const session = require('express-session');
 const bcrypt = require('bcrypt');
-const mysql = require('mysql2');
+const mysql = require('mysql2/promise');
 const path = require('path');
 require('dotenv').config();
 
 const app = express();
 const PORT = 3000;
 
-// node-fetch
+// node-fetch (ESM safe)
 const fetch = (...args) =>
   import('node-fetch').then(({ default: fetch }) => fetch(...args));
 
@@ -32,9 +32,10 @@ app.use(
 // DATABASE
 // ---------------------------
 if (!process.env.DB_HOST) {
-  console.error("❌ DB_HOST is not set. Check .env file.");
+  console.error('❌ DB_HOST missing in .env');
   process.exit(1);
 }
+
 const pool = mysql.createPool({
   host: process.env.DB_HOST,
   user: process.env.DB_USER,
@@ -44,13 +45,16 @@ const pool = mysql.createPool({
   connectionLimit: 10,
 });
 
-pool.getConnection((err, conn) => {
-  if (err) console.error('❌ DB connection failed:', err);
-  else {
+(async () => {
+  try {
+    const conn = await pool.getConnection();
     console.log('✅ Connected to MySQL RDS');
     conn.release();
+  } catch (err) {
+    console.error('❌ DB connection failed:', err.message);
+    process.exit(1);
   }
-});
+})();
 
 // ---------------------------
 // ROUTES
@@ -67,29 +71,37 @@ app.get('/signup', (_, res) =>
 // AUTH
 // ---------------------------
 app.post('/signup', async (req, res) => {
-  const hash = await bcrypt.hash(req.body.password, 10);
-  pool.query(
-    'INSERT INTO users (email, password) VALUES (?, ?)',
-    [req.body.email, hash],
-    err => (err ? res.send('Signup error') : res.redirect('/'))
-  );
+  try {
+    const hash = await bcrypt.hash(req.body.password, 10);
+    await pool.query(
+      'INSERT INTO users (email, password) VALUES (?, ?)',
+      [req.body.email, hash]
+    );
+    res.redirect('/');
+  } catch (err) {
+    res.send('Signup error');
+  }
 });
 
-app.post('/login', (req, res) => {
-  pool.query(
-    'SELECT * FROM users WHERE email=?',
-    [req.body.email],
-    async (err, rows) => {
-      if (err || !rows[0]) return res.send('Invalid login');
+app.post('/login', async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      'SELECT * FROM users WHERE email=?',
+      [req.body.email]
+    );
 
-      const ok = await bcrypt.compare(req.body.password, rows[0].password);
-      if (!ok) return res.send('Invalid login');
+    if (!rows[0]) return res.send('Invalid login');
 
-      req.session.userId = rows[0].id;
-      req.session.email = rows[0].email;
-      res.redirect('/account');
-    }
-  );
+    const ok = await bcrypt.compare(req.body.password, rows[0].password);
+    if (!ok) return res.send('Invalid login');
+
+    req.session.userId = rows[0].id;
+    req.session.email = rows[0].email;
+
+    res.redirect('/account');
+  } catch (err) {
+    res.send('Login error');
+  }
 });
 
 app.get('/logout', (req, res) => {
@@ -99,159 +111,129 @@ app.get('/logout', (req, res) => {
 // ---------------------------
 // ACCOUNT
 // ---------------------------
-app.get('/account', (req, res) => {
+app.get('/account', async (req, res) => {
   if (!req.session.userId) return res.redirect('/');
 
-  pool.query(
-    'SELECT email, balance FROM users WHERE id=?',
-    [req.session.userId],
-    (err, rows) => {
-      if (err) return res.send('Error loading account');
+  try {
+    const [rows] = await pool.query(
+      'SELECT email, balance FROM users WHERE id=?',
+      [req.session.userId]
+    );
 
-      res.send(`
-        <h2>Welcome ${rows[0].email}</h2>
-        <h3>Balance: $${rows[0].balance}</h3>
+    res.send(`
+      <h2>Welcome ${rows[0].email}</h2>
+      <h3>Balance: $${rows[0].balance}</h3>
 
-        <form method="POST" action="/transfer">
-          <input name="receiver" placeholder="Receiver Email" required />
-          <input name="amount" type="number" step="0.01" required />
-          <button>Transfer</button>
-        </form>
+      <form method="POST" action="/transfer">
+        <input name="receiver" placeholder="Receiver Email" required />
+        <input name="amount" type="number" step="0.01" required />
+        <button>Transfer</button>
+      </form>
 
-        <a href="/logout">Logout</a>
-      `);
-    }
-  );
+      <a href="/logout">Logout</a>
+    `);
+  } catch (err) {
+    res.send('Error loading account');
+  }
 });
 
 // ---------------------------
-// TRANSFER MONEY (FIXED)
+// ✅ TRANSFER MONEY (ASYNC/AWAIT + LOGS)
 // ---------------------------
-app.post('/transfer', (req, res) => {
+app.post('/transfer', async (req, res) => {
   console.log('🚀 /transfer route hit');
 
   if (!req.session.userId) return res.redirect('/');
 
-  const receiver = req.body.receiver;
-  const amt = parseFloat(req.body.amount);
+  try {
+    console.log('Request body:', req.body);
+    console.log('Session email:', req.session.email);
 
-  if (!receiver || isNaN(amt) || amt <= 0) {
-    return res.send('Invalid transfer data');
-  }
+    const receiver = req.body.receiver;
+    const amt = parseFloat(req.body.amount);
 
-  console.log('SESSION EMAIL:', req.session.email);
+    if (!receiver || isNaN(amt) || amt <= 0) {
+      return res.send('Invalid transfer data');
+    }
 
-  pool.getConnection((err, conn) => {
-    if (err) return res.send('DB error');
+    const conn = await pool.getConnection();
+    await conn.beginTransaction();
 
-    conn.beginTransaction(err => {
-      if (err) {
-        conn.release();
-        return res.send('Transaction error');
-      }
+    // Sender
+    const [senderRows] = await conn.query(
+      'SELECT * FROM users WHERE id=?',
+      [req.session.userId]
+    );
 
-      conn.query(
-        'SELECT * FROM users WHERE id=?',
-        [req.session.userId],
-        (err, senderRows) => {
-          if (err || !senderRows[0] || senderRows[0].balance < amt) {
-            return conn.rollback(() => {
-              conn.release();
-              res.send('Insufficient balance');
-            });
-          }
+    if (!senderRows[0] || senderRows[0].balance < amt) {
+      await conn.rollback();
+      conn.release();
+      return res.send('Insufficient balance');
+    }
 
-          conn.query(
-            'SELECT * FROM users WHERE email=?',
-            [receiver],
-            (err, recvRows) => {
-              if (err || !recvRows[0]) {
-                return conn.rollback(() => {
-                  conn.release();
-                  res.send('Receiver not found');
-                });
-              }
+    // Receiver
+    const [recvRows] = await conn.query(
+      'SELECT * FROM users WHERE email=?',
+      [receiver]
+    );
 
-              conn.query(
-                'UPDATE users SET balance = balance - ? WHERE id=?',
-                [amt, senderRows[0].id],
-                err => {
-                  if (err) {
-                    return conn.rollback(() => {
-                      conn.release();
-                      res.send('Debit failed');
-                    });
-                  }
+    if (!recvRows[0]) {
+      await conn.rollback();
+      conn.release();
+      return res.send('Receiver not found');
+    }
 
-                  conn.query(
-                    'UPDATE users SET balance = balance + ? WHERE id=?',
-                    [amt, recvRows[0].id],
-                    err => {
-                      if (err) {
-                        return conn.rollback(() => {
-                          conn.release();
-                          res.send('Credit failed');
-                        });
-                      }
+    // Debit
+    await conn.query(
+      'UPDATE users SET balance = balance - ? WHERE id=?',
+      [amt, senderRows[0].id]
+    );
 
-                      conn.query(
-                        'INSERT INTO transactions (sender_id, receiver_id, type, amount, date) VALUES (?, ?, "transfer", ?, NOW())',
-                        [senderRows[0].id, recvRows[0].id, amt],
-                        err => {
-                          if (err) {
-                            return conn.rollback(() => {
-                              conn.release();
-                              res.send('Transaction log failed');
-                            });
-                          }
+    // Credit
+    await conn.query(
+      'UPDATE users SET balance = balance + ? WHERE id=?',
+      [amt, recvRows[0].id]
+    );
 
-                          conn.commit(err => {
-                            if (err) {
-                              return conn.rollback(() => {
-                                conn.release();
-                                res.send('Commit failed');
-                              });
-                            }
+    // Log transaction
+    await conn.query(
+      'INSERT INTO transactions (sender_id, receiver_id, type, amount, date) VALUES (?, ?, "transfer", ?, NOW())',
+      [senderRows[0].id, recvRows[0].id, amt]
+    );
 
-                            conn.release();
-                            console.log('✅ DB transaction committed');
+    await conn.commit();
+    conn.release();
 
-                            // 🔥 SERVERLESS AUDIT
-                            console.log('📤 Sending audit to Lambda');
+    console.log('✅ DB transaction successful');
 
-                            fetch('https://ouuoixhdzj.execute-api.us-east-1.amazonaws.com/audit', {
-                              method: 'POST',
-                              headers: { 'Content-Type': 'application/json' },
-                              body: JSON.stringify({
-                                user: req.session.email,
-                                amount: amt,
-                                type: 'transfer',
-                                timestamp: new Date().toISOString(),
-                              }),
-                            })
-                              .then(r => r.json())
-                              .then(d => console.log('✅ Lambda response:', d))
-                              .catch(e => console.error('❌ Audit failed:', e.message));
+    // ---------------------------
+    // 🔥 SERVERLESS AUDIT
+    // ---------------------------
+    console.log('📤 Sending audit to Lambda...');
 
-                            res.redirect('/account');
-                          });
-                        }
-                      );
-                    }
-                  );
-                }
-              );
-            }
-          );
-        }
-      );
+    const response = await fetch(process.env.AUDIT_API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        user: req.session.email,
+        amount: amt,
+        type: 'transfer',
+        timestamp: new Date().toISOString(),
+      }),
     });
-  });
+
+    const data = await response.json();
+    console.log('✅ Lambda response:', data);
+
+    res.redirect('/account');
+
+  } catch (err) {
+    console.error('❌ Transfer failed:', err);
+    res.status(500).send('Transfer failed');
+  }
 });
 
 // ---------------------------
 app.listen(PORT, () =>
   console.log(`✅ Server running on http://<elastic_ip>:${PORT}`)
 );
-
-
