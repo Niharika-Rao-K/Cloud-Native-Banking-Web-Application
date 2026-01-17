@@ -1,4 +1,5 @@
 // server.js
+console.log("🔥 NEW SERVER.JS LOADED — NO NODE-FETCH");
 const express = require('express');
 const session = require('express-session');
 const bcrypt = require('bcrypt');
@@ -53,7 +54,7 @@ const pool = mysql.createPool({
 })();
 
 // ---------------------------
-// TEMP TEST ROUTE
+// TEMPORARY TEST ROUTE (bypass session)
 // ---------------------------
 app.post('/test', (req, res) => {
   console.log('🚀 /test route hit');
@@ -61,6 +62,7 @@ app.post('/test', (req, res) => {
   console.log('Body:', req.body);
   res.json({ received: req.body });
 });
+
 
 // ---------------------------
 // ROUTES
@@ -120,27 +122,31 @@ app.get('/logout', (req, res) => {
 app.get('/account', async (req, res) => {
   if (!req.session.userId) return res.redirect('/');
 
-  const [rows] = await pool.query(
-    'SELECT email, balance FROM users WHERE id=?',
-    [req.session.userId]
-  );
+  try {
+    const [rows] = await pool.query(
+      'SELECT email, balance FROM users WHERE id=?',
+      [req.session.userId]
+    );
 
-  res.send(`
-    <h2>Welcome ${rows[0].email}</h2>
-    <h3>Balance: $${rows[0].balance}</h3>
+    res.send(`
+      <h2>Welcome ${rows[0].email}</h2>
+      <h3>Balance: $${rows[0].balance}</h3>
 
-    <form method="POST" action="/transfer">
-      <input name="receiver" placeholder="Receiver Email" required />
-      <input name="amount" type="number" step="0.01" required />
-      <button>Transfer</button>
-    </form>
+      <form method="POST" action="/transfer">
+        <input name="receiver" placeholder="Receiver Email" required />
+        <input name="amount" type="number" step="0.01" required />
+        <button>Transfer</button>
+      </form>
 
-    <a href="/logout">Logout</a>
-  `);
+      <a href="/logout">Logout</a>
+    `);
+  } catch (err) {
+    res.send('Error loading account');
+  }
 });
 
 // ---------------------------
-// ✅ TRANSFER + LAMBDA AUDIT
+// ✅ TRANSFER MONEY (ASYNC/AWAIT + LOGS)
 // ---------------------------
 app.post('/transfer', async (req, res) => {
   console.log('🚀 /transfer route hit');
@@ -161,38 +167,27 @@ app.post('/transfer', async (req, res) => {
     const conn = await pool.getConnection();
     await conn.beginTransaction();
 
-    const [senderRows] = await conn.query(
-      'SELECT * FROM users WHERE id=?',
-      [req.session.userId]
-    );
-
+    // Get sender
+    const [senderRows] = await conn.query('SELECT * FROM users WHERE id=?', [req.session.userId]);
     if (!senderRows[0] || senderRows[0].balance < amt) {
       await conn.rollback();
       conn.release();
       return res.send('Insufficient balance');
     }
 
-    const [recvRows] = await conn.query(
-      'SELECT * FROM users WHERE email=?',
-      [receiver]
-    );
-
+    // Get receiver
+    const [recvRows] = await conn.query('SELECT * FROM users WHERE email=?', [receiver]);
     if (!recvRows[0]) {
       await conn.rollback();
       conn.release();
       return res.send('Receiver not found');
     }
 
-    await conn.query(
-      'UPDATE users SET balance = balance - ? WHERE id=?',
-      [amt, senderRows[0].id]
-    );
+    // Update balances
+    await conn.query('UPDATE users SET balance = balance - ? WHERE id=?', [amt, senderRows[0].id]);
+    await conn.query('UPDATE users SET balance = balance + ? WHERE id=?', [amt, recvRows[0].id]);
 
-    await conn.query(
-      'UPDATE users SET balance = balance + ? WHERE id=?',
-      [amt, recvRows[0].id]
-    );
-
+    // Log transaction
     await conn.query(
       'INSERT INTO transactions (sender_id, receiver_id, type, amount, date) VALUES (?, ?, "transfer", ?, NOW())',
       [senderRows[0].id, recvRows[0].id, amt]
@@ -203,22 +198,18 @@ app.post('/transfer', async (req, res) => {
 
     console.log('✅ DB transaction committed');
 
-    // 🔥 SEND AUDIT TO LAMBDA (native fetch)
+    // Send audit to Lambda
     console.log('📤 Sending audit to Lambda');
-
-    const response = await fetch(
-      'https://ouuoixhdzj.execute-api.us-east-1.amazonaws.com/audit',
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          user: req.session.email,
-          amount: amt,
-          type: 'transfer',
-          timestamp: new Date().toISOString(),
-        }),
-      }
-    );
+    const response = await fetch('https://ouuoixhdzj.execute-api.us-east-1.amazonaws.com/audit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        user: req.session.email,
+        amount: amt,
+        type: 'transfer',
+        timestamp: new Date().toISOString()
+      })
+    });
 
     const data = await response.json();
     console.log('✅ Lambda response:', data);
