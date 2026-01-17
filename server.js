@@ -159,41 +159,25 @@ app.post('/transfer', async (req, res) => {
     const conn = await pool.getConnection();
     await conn.beginTransaction();
 
-    // Sender
-    const [senderRows] = await conn.query(
-      'SELECT * FROM users WHERE id=?',
-      [req.session.userId]
-    );
-
+    // Get sender
+    const [senderRows] = await conn.query('SELECT * FROM users WHERE id=?', [req.session.userId]);
     if (!senderRows[0] || senderRows[0].balance < amt) {
       await conn.rollback();
       conn.release();
       return res.send('Insufficient balance');
     }
 
-    // Receiver
-    const [recvRows] = await conn.query(
-      'SELECT * FROM users WHERE email=?',
-      [receiver]
-    );
-
+    // Get receiver
+    const [recvRows] = await conn.query('SELECT * FROM users WHERE email=?', [receiver]);
     if (!recvRows[0]) {
       await conn.rollback();
       conn.release();
       return res.send('Receiver not found');
     }
 
-    // Debit
-    await conn.query(
-      'UPDATE users SET balance = balance - ? WHERE id=?',
-      [amt, senderRows[0].id]
-    );
-
-    // Credit
-    await conn.query(
-      'UPDATE users SET balance = balance + ? WHERE id=?',
-      [amt, recvRows[0].id]
-    );
+    // Update balances
+    await conn.query('UPDATE users SET balance = balance - ? WHERE id=?', [amt, senderRows[0].id]);
+    await conn.query('UPDATE users SET balance = balance + ? WHERE id=?', [amt, recvRows[0].id]);
 
     // Log transaction
     await conn.query(
@@ -204,22 +188,19 @@ app.post('/transfer', async (req, res) => {
     await conn.commit();
     conn.release();
 
-    console.log('✅ DB transaction successful');
+    console.log('✅ DB transaction committed');
 
-    // ---------------------------
-    // 🔥 SERVERLESS AUDIT
-    // ---------------------------
-    console.log('📤 Sending audit to Lambda...');
-
-    const response = await fetch(process.env.AUDIT_API_URL, {
+    // Send audit to Lambda
+    console.log('📤 Sending audit to Lambda');
+    const response = await fetch('https://ouuoixhdzj.execute-api.us-east-1.amazonaws.com/audit', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         user: req.session.email,
         amount: amt,
         type: 'transfer',
-        timestamp: new Date().toISOString(),
-      }),
+        timestamp: new Date().toISOString()
+      })
     });
 
     const data = await response.json();
@@ -237,3 +218,4 @@ app.post('/transfer', async (req, res) => {
 app.listen(PORT, () =>
   console.log(`✅ Server running on http://<elastic_ip>:${PORT}`)
 );
+
