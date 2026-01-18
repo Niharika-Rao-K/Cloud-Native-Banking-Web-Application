@@ -1,18 +1,35 @@
 <!DOCTYPE html>
 <html>
+<head>
+<style>
+body { background:#c9f4f6; font-family:Arial; padding:40px }
+.card {
+  background:white; padding:30px; width:380px;
+  margin:auto; border-radius:12px;
+}
+.balance {
+  background:#00897b; color:white;
+  padding:15px; border-radius:8px;
+  text-align:center; margin:15px 0;
+}
+button { width:100%; padding:10px; margin:5px 0 }
+</style>
+</head>
 <body>
-<h2>Welcome {{EMAIL}}</h2>
-<p>Balance: ${{BALANCE}}</p>
+<div class="card">
+  <h3>SmartBank</h3>
+  <p>Welcome {{EMAIL}}</p>
+  <div class="balance">${{BALANCE}}</div>
 
-<form method="POST" action="/transfer">
-  <input name="receiver" placeholder="Receiver Email" required>
-  <input name="amount" type="number" required>
-  <button>Transfer</button>
-</form>
+  <form method="POST" action="/transfer">
+    <input name="receiver" placeholder="Recipient Email" required>
+    <input name="amount" type="number" required>
+    <button>Send</button>
+  </form>
 
-<br>
-<a href="/profile">Profile</a>
-<a href="/transactions">Transactions</a>
-<a href="/logout">Logout</a>
+  <a href="/transactions">View Transactions</a><br>
+  <a href="/profile">Profile Settings</a><br>
+  <a href="/logout">Logout</a>
+</div>
 </body>
 </html>
