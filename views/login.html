@@ -1,12 +1,33 @@
 <!DOCTYPE html>
 <html>
+<head>
+<style>
+body {
+  background: linear-gradient(120deg,#6a7cf7,#7f3fbf);
+  display:flex; justify-content:center; align-items:center;
+  height:100vh; font-family:Arial;
+}
+.card {
+  background:white; padding:40px; width:350px;
+  border-radius:12px; text-align:center;
+}
+input,button {
+  width:100%; padding:10px; margin:10px 0;
+}
+button {
+  background:#7f3fbf; color:white; border:none;
+}
+</style>
+</head>
 <body>
-<h2>Login</h2>
-<form method="POST" action="/login">
-  <input name="email" placeholder="Email" required>
-  <input name="password" type="password" placeholder="Password" required>
-  <button>Login</button>
-</form>
-<a href="/signup">Register</a>
+<div class="card">
+  <h2>Welcome to SmartBank</h2>
+  <form method="POST" action="/login">
+    <input name="email" placeholder="Email" required>
+    <input name="password" type="password" placeholder="Password" required>
+    <button>Login</button>
+  </form>
+  <small>Demo Bank App – For Learning</small>
+</div>
 </body>
 </html>
