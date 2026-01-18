@@ -1,12 +1,21 @@
 <!DOCTYPE html>
 <html>
+<head>
+<style>
+body { background:#d8f7f0; padding:40px; font-family:Arial }
+.card {
+  background:white; padding:30px;
+  max-width:400px; margin:auto;
+  border-radius:10px;
+}
+</style>
+</head>
 <body>
-<h2>Profile</h2>
-<p>ID: {{ID}}</p>
-<p>Email: {{EMAIL}}</p>
-<p>Balance: ${{BALANCE}}</p>
-<p>Created: {{CREATED}}</p>
-
-<a href="/account">Back</a>
+<div class="card">
+  <h3>Profile Settings</h3>
+  <p>Email: {{EMAIL}}</p>
+  <p>Balance: ${{BALANCE}}</p>
+  <a href="/account">Back to Dashboard</a>
+</div>
 </body>
 </html>
