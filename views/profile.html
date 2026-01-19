@@ -1,21 +1,77 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-<style>
-body { background:#d8f7f0; padding:40px; font-family:Arial }
-.card {
-  background:white; padding:30px;
-  max-width:400px; margin:auto;
-  border-radius:10px;
-}
-</style>
+  <meta charset="UTF-8" />
+  <title>Profile Settings</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet"/>
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css" rel="stylesheet"/>
+
+  <style>
+    body {
+      background: linear-gradient(135deg, #b2f7ef, #eff7f6);
+      font-family: 'Poppins', sans-serif;
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+    .profile-card {
+      background: #fff;
+      border-radius: 20px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+      padding: 35px;
+      width: 100%;
+      max-width: 550px;
+    }
+  </style>
 </head>
+
 <body>
-<div class="card">
-  <h3>Profile Settings</h3>
-  <p>Email: {{EMAIL}}</p>
-  <p>Balance: ${{BALANCE}}</p>
-  <a href="/account">Back to Dashboard</a>
-</div>
+  <div class="profile-card">
+    <h3 class="text-center mb-3">
+      <i class="fa-solid fa-user-gear"></i> Profile Settings
+    </h3>
+
+    <div class="alert alert-success">
+      <strong>Account Number:</strong> ACCT123456
+    </div>
+
+    <form method="POST" action="/profile/update">
+      <div class="mb-3">
+        <label class="form-label">Full Name</label>
+        <input type="text" name="full_name" class="form-control" value="John Doe" required />
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label">Phone</label>
+        <input type="text" name="phone" class="form-control" value="+91XXXXXXXXXX" />
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label">Address</label>
+        <textarea name="address" class="form-control">Bangalore, India</textarea>
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label">Email</label>
+        <input type="email" name="email" class="form-control" value="user@email.com" required />
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label">New Password (optional)</label>
+        <input type="password" name="password" class="form-control" />
+      </div>
+
+      <button class="btn btn-primary w-100">
+        Save Changes
+      </button>
+    </form>
+
+    <a href="/account" class="btn btn-outline-secondary w-100 mt-3">
+      Back to Dashboard
+    </a>
+  </div>
 </body>
 </html>
