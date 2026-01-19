@@ -88,13 +88,13 @@
       <!-- User -->
       <h5 class="text-muted mb-3">
         <i class="fa-solid fa-user"></i>
-        Welcome, user@email.com
+        Welcome, <span id="user-email">Loading...</span>
       </h5>
 
       <!-- Balance -->
       <div class="balance-box shadow-sm mb-4">
         <i class="fa-solid fa-wallet"></i>
-        $0.00
+        $<span id="user-balance">0.00</span>
       </div>
 
       <!-- Add Money -->
@@ -170,5 +170,17 @@
 
     </div>
   </div>
+
+  <script>
+    // Fetch account info dynamically
+    async function loadAccount() {
+      const res = await fetch('/api/account');
+      if (!res.ok) return;
+      const data = await res.json();
+      document.getElementById('user-email').textContent = data.email;
+      document.getElementById('user-balance').textContent = parseFloat(data.balance).toFixed(2);
+    }
+    loadAccount();
+  </script>
 </body>
 </html>
