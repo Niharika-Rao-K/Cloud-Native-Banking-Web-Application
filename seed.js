@@ -4,10 +4,10 @@ const mysql = require('mysql2');
 require('dotenv').config();
 
 const pool = mysql.createPool({
-  host: process.env.banking-db.c6lmm0ime0ay.us-east-1.rds.amazonaws.com,
-  user: process.env.admin,
-  password: process.env.bank-cloud9,
-  database: process.env.banking,
+  host: process.env.DB_HOST,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASS,
+  database: process.env.DB_NAME,
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0
@@ -22,23 +22,23 @@ const users = [
 ];
 
 async function seed() {
-  for (const u of users) {
-    const hash = await bcrypt.hash(u.password, 10);
-    pool.query(
-      `INSERT INTO users (full_name, email, password, balance) VALUES (?, ?, ?, ?)
-       ON DUPLICATE KEY UPDATE email=email`,
-      [u.full_name, u.email, hash, u.balance],
-      (err) => {
-        if (err) console.error('Error inserting', u.email, err.message);
-        else console.log(`✅ Inserted ${u.email}`);
-      }
-    );
-  }
-
-  setTimeout(() => {
+  try {
+    for (const u of users) {
+      const hash = await bcrypt.hash(u.password, 10);
+      await pool.promise().query(
+        `INSERT INTO users (full_name, email, password, balance)
+         VALUES (?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE email=email`,
+        [u.full_name, u.email, hash, u.balance]
+      );
+      console.log(`✅ Inserted/Updated ${u.email}`);
+    }
     console.log('✅ MySQL seeding complete.');
+  } catch (err) {
+    console.error('❌ Seeding error:', err);
+  } finally {
     pool.end();
-  }, 2000);
+  }
 }
 
 seed();
