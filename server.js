@@ -5,7 +5,7 @@ const bcrypt = require('bcrypt');
 const mysql = require('mysql2/promise');
 const path = require('path');
 require('dotenv').config();
-const fetch = require('node-fetch'); // for Node <18
+const fetch = require('node-fetch'); // For Node <18
 
 const app = express();
 const PORT = 3000;
@@ -21,7 +21,7 @@ app.use(
   session({
     secret: 'secret-key',
     resave: false,
-    saveUninitialized: true,
+    saveUninitialized: false, // important for session persistence
   })
 );
 
@@ -42,6 +42,7 @@ const pool = mysql.createPool({
   connectionLimit: 10,
 });
 
+// Verify DB connection
 (async () => {
   try {
     const conn = await pool.getConnection();
@@ -54,23 +55,21 @@ const pool = mysql.createPool({
 })();
 
 // ---------------------------
-// TEMP TEST ROUTE
+// AUTH GUARD
 // ---------------------------
-app.post('/test', (req, res) => {
-  console.log('🚀 /test route hit');
-  console.log('Headers:', req.headers);
-  console.log('Body:', req.body);
-  res.json({ received: req.body });
-});
+const requireAuth = (req, res, next) => {
+  if (!req.session.userId) return res.redirect('/');
+  next();
+};
 
 // ---------------------------
-// ROUTES - HTML VIEWS
+// HTML ROUTES
 // ---------------------------
 app.get('/', (_, res) => res.sendFile(path.join(__dirname, 'views', 'login.html')));
 app.get('/signup', (_, res) => res.sendFile(path.join(__dirname, 'views', 'register.html')));
-app.get('/account', (_, res) => res.sendFile(path.join(__dirname, 'views', 'account.html')));
-app.get('/transactions', (_, res) => res.sendFile(path.join(__dirname, 'views', 'transactions.html')));
-app.get('/profile', (_, res) => res.sendFile(path.join(__dirname, 'views', 'profile.html')));
+app.get('/account', requireAuth, (_, res) => res.sendFile(path.join(__dirname, 'views', 'account.html')));
+app.get('/transactions', requireAuth, (_, res) => res.sendFile(path.join(__dirname, 'views', 'transactions.html')));
+app.get('/profile', requireAuth, (_, res) => res.sendFile(path.join(__dirname, 'views', 'profile.html')));
 
 // ---------------------------
 // AUTH
@@ -78,10 +77,7 @@ app.get('/profile', (_, res) => res.sendFile(path.join(__dirname, 'views', 'prof
 app.post('/signup', async (req, res) => {
   try {
     const hash = await bcrypt.hash(req.body.password, 10);
-    await pool.query('INSERT INTO users (email, password) VALUES (?, ?)', [
-      req.body.email,
-      hash,
-    ]);
+    await pool.query('INSERT INTO users (email, password) VALUES (?, ?)', [req.body.email, hash]);
     console.log(`✅ New user registered: ${req.body.email}`);
     res.redirect('/');
   } catch (err) {
@@ -106,8 +102,8 @@ app.post('/login', async (req, res) => {
 
     req.session.userId = rows[0].id;
     req.session.email = rows[0].email;
-    console.log(`✅ User logged in: ${req.session.email}`);
 
+    console.log(`✅ User logged in: ${req.session.email}`);
     res.redirect('/account');
   } catch (err) {
     console.error('❌ Login error:', err);
@@ -121,10 +117,9 @@ app.get('/logout', (req, res) => {
 });
 
 // ---------------------------
-// API ROUTES FOR DYNAMIC DATA
+// API ROUTES
 // ---------------------------
-app.get('/api/account', async (req, res) => {
-  if (!req.session.userId) return res.status(401).json({ error: 'Unauthorized' });
+app.get('/api/account', requireAuth, async (req, res) => {
   try {
     const [rows] = await pool.query('SELECT email, balance FROM users WHERE id=?', [req.session.userId]);
     res.json({ email: rows[0].email, balance: rows[0].balance });
@@ -134,16 +129,17 @@ app.get('/api/account', async (req, res) => {
   }
 });
 
-app.get('/api/me', (req, res) => {
-  if (!req.session.email) {
-    return res.status(401).json({ error: 'Unauthorized' });
+app.get('/api/me', requireAuth, async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT email FROM users WHERE id=?', [req.session.userId]);
+    res.json({ email: rows[0].email });
+  } catch (err) {
+    console.error('❌ /api/me error:', err);
+    res.status(500).json({ error: 'Server error' });
   }
-  res.json({ email: req.session.email });
 });
 
-
-app.get('/api/transactions', async (req, res) => {
-  if (!req.session.userId) return res.status(401).json({ error: 'Unauthorized' });
+app.get('/api/transactions', requireAuth, async (req, res) => {
   try {
     const [rows] = await pool.query(
       `SELECT t.id, u1.email AS sender, u2.email AS receiver, t.type, t.amount, t.date
@@ -162,58 +158,112 @@ app.get('/api/transactions', async (req, res) => {
 });
 
 // ---------------------------
-// ADD MONEY + LAMBDA AUDIT
+// PROFILE DATA API
 // ---------------------------
-app.post('/add-money', async (req, res) => {
-  console.log('💰 /add-money route hit');
+app.get('/api/profile', requireAuth, async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      'SELECT email, full_name, phone, address FROM users WHERE id=?',
+      [req.session.userId]
+    );
 
-  if (!req.session.userId) return res.redirect('/');
+    if (!rows[0]) return res.status(404).json({ error: 'User not found' });
 
+    // generate a random account number for display
+    const user = rows[0];
+    user.account_no = `ACCT${Math.floor(100000 + Math.random() * 900000)}`;
+
+    res.json(user);
+  } catch (err) {
+    console.error('❌ /api/profile error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ---------------------------
+// PROFILE UPDATE
+// ---------------------------
+app.post('/profile/update', requireAuth, async (req, res) => {
+  try {
+    const { email, password, full_name, phone, address } = req.body;
+
+    let query = 'UPDATE users SET email=?';
+    const params = [email];
+
+    if (password && password.trim() !== '') {
+      const hash = await bcrypt.hash(password, 10);
+      query += ', password=?';
+      params.push(hash);
+    }
+    if (full_name !== undefined) { query += ', full_name=?'; params.push(full_name); }
+    if (phone !== undefined) { query += ', phone=?'; params.push(phone); }
+    if (address !== undefined) { query += ', address=?'; params.push(address); }
+
+    query += ' WHERE id=?';
+    params.push(req.session.userId);
+
+    try {
+      await pool.query(query, params);
+    } catch (err) {
+      if (err.code === 'ER_DUP_ENTRY') return res.send('Email already in use');
+      throw err;
+    }
+
+    req.session.email = email;
+
+    console.log(`✅ Profile updated: ${email}`);
+
+    // CloudWatch audit log
+    await fetch('https://ouuoixhdzj.execute-api.us-east-1.amazonaws.com/audit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        user: email,
+        type: 'profile_update',
+        timestamp: new Date().toISOString(),
+      }),
+    });
+
+    res.redirect(303, '/profile');
+  } catch (err) {
+    console.error('❌ Profile update failed:', err);
+    res.status(500).send('Profile update failed');
+  }
+});
+
+// ---------------------------
+// ADD MONEY
+// ---------------------------
+app.post('/add-money', requireAuth, async (req, res) => {
   try {
     const amount = parseFloat(req.body.amount);
-    if (isNaN(amount) || amount <= 0) {
-      return res.send('Invalid amount');
-    }
+    if (isNaN(amount) || amount <= 0) return res.send('Invalid amount');
 
     const conn = await pool.getConnection();
     await conn.beginTransaction();
 
-    // Update balance
+    await conn.query('UPDATE users SET balance = balance + ? WHERE id=?', [amount, req.session.userId]);
     await conn.query(
-      'UPDATE users SET balance = balance + ? WHERE id = ?',
-      [amount, req.session.userId]
-    );
-
-    // Insert transaction record
-    await conn.query(
-      `INSERT INTO transactions (sender_id, receiver_id, type, amount, date)
-       VALUES (?, ?, 'credit', ?, NOW())`,
+      'INSERT INTO transactions (sender_id, receiver_id, type, amount, date) VALUES (?, ?, "credit", ?, NOW())',
       [req.session.userId, req.session.userId, amount]
     );
 
     await conn.commit();
     conn.release();
 
-    console.log(`✅ Money added: ${req.session.email} +$${amount}`);
+    console.log(`💰 Money added: ${req.session.email} +$${amount}`);
 
-    // 🔥 Send audit to Lambda
-    console.log('📤 Sending ADD_MONEY audit to Lambda');
-    const response = await fetch(
-      'https://ouuoixhdzj.execute-api.us-east-1.amazonaws.com/audit',
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          user: req.session.email,
-          amount,
-          type: 'add-money',
-          timestamp: new Date().toISOString(),
-        }),
-      }
-    );
-
-    const data = await response.json();
-    console.log('✅ Lambda response (add-money):', data);
+    // CloudWatch audit
+    await fetch('https://ouuoixhdzj.execute-api.us-east-1.amazonaws.com/audit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        user: req.session.email,
+        type: 'add-money',
+        amount,
+        timestamp: new Date().toISOString(),
+      }),
+    });
 
     res.redirect('/account');
   } catch (err) {
@@ -222,18 +272,13 @@ app.post('/add-money', async (req, res) => {
   }
 });
 
-
 // ---------------------------
-// TRANSFER + LAMBDA AUDIT
+// TRANSFER MONEY
 // ---------------------------
-app.post('/transfer', async (req, res) => {
-  console.log('🚀 /transfer route hit');
-  if (!req.session.userId) return res.redirect('/');
-
+app.post('/transfer', requireAuth, async (req, res) => {
   try {
-    const receiver = req.body.receiver;
-    const amt = parseFloat(req.body.amount);
-
+    const { receiver, amount } = req.body;
+    const amt = parseFloat(amount);
     if (!receiver || isNaN(amt) || amt <= 0) return res.send('Invalid transfer data');
 
     const conn = await pool.getConnection();
@@ -263,23 +308,20 @@ app.post('/transfer', async (req, res) => {
 
     await conn.commit();
     conn.release();
-    console.log(`✅ Transfer completed: ${senderRows[0].email} -> ${receiver} : $${amt}`);
 
-    // 🔥 Send audit to Lambda
-    console.log('📤 Sending audit to Lambda');
-    const response = await fetch('https://ouuoixhdzj.execute-api.us-east-1.amazonaws.com/audit', {
+    console.log(`💸 Transfer completed: ${senderRows[0].email} -> ${receiver} : $${amt}`);
+
+    // CloudWatch audit
+    await fetch('https://ouuoixhdzj.execute-api.us-east-1.amazonaws.com/audit', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         user: req.session.email,
-        amount: amt,
         type: 'transfer',
+        amount: amt,
         timestamp: new Date().toISOString(),
       }),
     });
-
-    const data = await response.json();
-    console.log('✅ Lambda response:', data);
 
     res.redirect('/account');
   } catch (err) {
@@ -289,6 +331,6 @@ app.post('/transfer', async (req, res) => {
 });
 
 // ---------------------------
-app.listen(PORT, () =>
-  console.log(`✅ Server running on http://<elastic_ip>:${PORT}`)
-);
+app.listen(PORT, () => {
+  console.log(`✅ Server running on http://<elastic_ip>:${PORT}`);
+});
