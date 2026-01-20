@@ -134,6 +134,14 @@ app.get('/api/account', async (req, res) => {
   }
 });
 
+app.get('/api/me', (req, res) => {
+  if (!req.session.email) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  res.json({ email: req.session.email });
+});
+
+
 app.get('/api/transactions', async (req, res) => {
   if (!req.session.userId) return res.status(401).json({ error: 'Unauthorized' });
   try {
@@ -152,6 +160,68 @@ app.get('/api/transactions', async (req, res) => {
     res.status(500).json({ error: 'Server error' });
   }
 });
+
+// ---------------------------
+// ADD MONEY + LAMBDA AUDIT
+// ---------------------------
+app.post('/add-money', async (req, res) => {
+  console.log('💰 /add-money route hit');
+
+  if (!req.session.userId) return res.redirect('/');
+
+  try {
+    const amount = parseFloat(req.body.amount);
+    if (isNaN(amount) || amount <= 0) {
+      return res.send('Invalid amount');
+    }
+
+    const conn = await pool.getConnection();
+    await conn.beginTransaction();
+
+    // Update balance
+    await conn.query(
+      'UPDATE users SET balance = balance + ? WHERE id = ?',
+      [amount, req.session.userId]
+    );
+
+    // Insert transaction record
+    await conn.query(
+      `INSERT INTO transactions (sender_id, receiver_id, type, amount, date)
+       VALUES (?, ?, 'credit', ?, NOW())`,
+      [req.session.userId, req.session.userId, amount]
+    );
+
+    await conn.commit();
+    conn.release();
+
+    console.log(`✅ Money added: ${req.session.email} +$${amount}`);
+
+    // 🔥 Send audit to Lambda
+    console.log('📤 Sending ADD_MONEY audit to Lambda');
+    const response = await fetch(
+      'https://ouuoixhdzj.execute-api.us-east-1.amazonaws.com/audit',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user: req.session.email,
+          amount,
+          type: 'add-money',
+          timestamp: new Date().toISOString(),
+        }),
+      }
+    );
+
+    const data = await response.json();
+    console.log('✅ Lambda response (add-money):', data);
+
+    res.redirect('/account');
+  } catch (err) {
+    console.error('❌ Add money failed:', err);
+    res.status(500).send('Add money failed');
+  }
+});
+
 
 // ---------------------------
 // TRANSFER + LAMBDA AUDIT
