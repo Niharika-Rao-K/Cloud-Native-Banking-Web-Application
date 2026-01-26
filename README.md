@@ -1,5 +1,4 @@
 # Cloud-Native-Banking-Web-Application
-# Cloud-Native Banking Web Application
 
 A secure, cloud-native banking web application deployed on **AWS**, demonstrating **infrastructure automation, CI/CD pipelines, monitoring, security, and serverless integration**.
 
