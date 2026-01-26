@@ -126,7 +126,3 @@ Cloud-Native-Banking-Web-Application/
 
 ---
 
-## 👩‍💻 Author
-
-**Niharika Rao K**  
-*Cloud Infrastructure, Automation & Deployment Ecosystem Project*
